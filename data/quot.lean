@@ -5,6 +5,7 @@ Authors: Johannes Hölzl
 
 Quotients -- extends the core library
 -/
+import logic.relation
 variables {α : Sort*} {β : Sort*}
 
 namespace quot
@@ -58,6 +59,23 @@ meta def quot.unquot {r : α → α → Prop} : quot r → α := unchecked_cast
 
 @[simp] theorem quot.out_eq {r : α → α → Prop} (q : quot r) : quot.mk r q.out = q :=
 classical.some_spec (quot.exists_rep q)
+
+namespace quot
+section rel
+open relation relator
+local infixr ` ∘r ` : 80 := relation.comp
+
+lemma rel_lift {α : Type*} {β : Type*} {γ : Type*} {δ : Type*}
+  {r : α → α → Prop} {p : γ → γ → Prop} {s : quot r → quot p → Prop} {d : β → δ → Prop} (s' : α → γ → Prop)
+  {f : α → β} {g : γ → δ} {hf : ∀a b, r a b → f a = f b} {hg : ∀a b, p a b → g a = g b}
+  (h : (s' ⇒ d) f g) (h' : ∀a b, s (mk r a) (mk p b) → (r ∘r s' ∘r p) a b) :
+  (s ⇒ d) (lift f hf) (lift g hg) :=
+assume a b, quot.induction_on a $ assume a, quot.induction_on b $ assume b hab,
+  let ⟨x, rax, y, sxy, pyb⟩ := h' _ _ hab in
+  show d (f a) (g b), by rw [hf _ _ rax, ← hg _ _ pyb]; exact h sxy
+
+end rel
+end quot
 
 /-- Choose an element of the equivalence class using the axiom of choice.
   Sound but noncomputable. -/
