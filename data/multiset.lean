@@ -175,6 +175,10 @@ assume h, have a ∈ (0:multiset α), from h.symm ▸ mem_cons_self _ _, not_mem
 
 @[simp] lemma cons_ne_zero {a : α} {m : multiset α} : a :: m ≠ 0 := zero_ne_cons.symm
 
+lemma coe_eq_zero : ∀u : list α, (u : multiset α) = 0 ↔ u = nil
+| []      := by simp
+| (a::as) := by simpa using @cons_ne_zero α a as
+
 lemma cons_eq_cons {a b : α} {as bs : multiset α} :
   a :: as = b :: bs ↔ ((a = b ∧ as = bs) ∨ (a ≠ b ∧ ∃cs, as = b :: cs ∧ bs = a :: cs)) :=
 begin
@@ -1658,6 +1662,8 @@ end
 /- relator -/
 
 section rel
+local infixr ` ∘r ` : 80 := relation.comp
+open relation relator
 
 /-- `rel r s t` -- lift the relation `r` between two elements to a relation between `s` and `t`,
 s.t. there is a one-to-one mapping betweem elements in `s` and `t` following `r`. -/
@@ -1763,21 +1769,78 @@ lemma rel_map_right {s : multiset α} {t : multiset γ} {f : γ → β} :
   rel r s (t.map f) ↔ rel (λa b, r a (f b)) s t :=
 by rw [← rel_flip, rel_map_left, ← rel_flip]; refl
 
-lemma rel_join {s t} (h : rel (rel r) s t) : rel r s.join t.join :=
+lemma rel_coe : (forall₂ r ⇒ rel r) coe coe
+| _ _ forall₂.nil := rel.zero
+| _ _ (forall₂.cons hab h) := rel.cons hab (rel_coe h)
+
+lemma rel_coe_perm : ((perm ∘r forall₂ r) ⇒ rel r) coe coe :=
+assume a b ⟨c, hac, hcb⟩, (coe_eq_coe _ _).2 hac.symm ▸ rel_coe hcb
+
+lemma rel_coe_coe_iff {a : list α} {b : list β} : rel r a b ↔ (perm ∘r forall₂ r) a b :=
+have ∀{a b}, rel r a b → relation.map (forall₂ r) coe coe a b,
 begin
-  induction h,
-  case rel.zero { simp },
-  case rel.cons : a b s t hab hst ih { simpa using hab.add ih }
+  assume a b h, induction h,
+  case rel.zero { exact ⟨[], [], forall₂.nil, rfl, rfl⟩ },
+  case rel.cons : a b as bs hab hs ih {
+    rcases ih with ⟨xs, ys, h, rfl, rfl⟩,
+    exact ⟨a::xs, b::ys, forall₂.cons hab h, rfl, rfl⟩ }
+end,
+begin
+  split,
+  { assume h,
+    rcases this h with ⟨a', b', h, eqa, eqb⟩,
+    have : (perm ∘r forall₂ r ∘r  perm) a b, from
+      ⟨a', (coe_eq_coe _ _).1 eqa.symm, b', h, (coe_eq_coe _ _).1 eqb⟩,
+    simpa [forall₂_comp_perm_eq_perm_comp_forall₂, perm_comp_perm, comp_assoc.symm] },
+  { exact assume h, rel_coe_perm h }
 end
 
-lemma rel_map {p : γ → δ → Prop} {s t} {f : α → γ} {g : β → δ} (h : (r ⇒ p) f g) (hst : rel r s t) :
-  rel p (s.map f) (t.map g) :=
-by rw [rel_map_left, rel_map_right]; exact hst.mono (assume a b, h)
+lemma rel_lift {f : list α → γ} {g : list β → δ} {hf hg} (h : (forall₂ r ⇒ p) f g) :
+  (rel r ⇒ p) (quot.lift f hf) (quot.lift g hg) :=
+assume a b, quot.rel_lift (forall₂ r) (assume a b, h) $ assume a b (h : rel r a b),
+  let ⟨c, hac, hcb⟩ := rel_coe_coe_iff.1 h in ⟨c, hac, _, hcb, perm.refl _⟩
 
-lemma rel_bind {p : γ → δ → Prop} {s t} {f : α → multiset γ} {g : β → multiset δ}
-  (h : (r ⇒ rel p) f g) (hst : rel r s t) :
-  rel p (s.bind f) (t.bind g) :=
-by apply rel_join; apply rel_map; assumption
+lemma rel_comp {p : β → γ → Prop} : rel (r ∘r p) = rel r ∘r rel p :=
+begin
+  funext a c, apply propext,
+  split,
+  { assume h,
+    induction h,
+    case rel.zero { exact ⟨0, rel.zero, rel.zero⟩ },
+    case rel.cons : a c as cs h _ ih {
+      rcases h with ⟨b, hab, hbc⟩,
+      rcases ih with ⟨bs, hasbs, hbscs⟩,
+      exact ⟨b :: bs, rel.cons hab hasbs, rel.cons hbc hbscs⟩
+    } },
+  { assume h,
+    rcases h with ⟨b, hab, hbc⟩,
+    induction hab generalizing c,
+    case rel.zero { simp at hbc, subst hbc, exact rel.zero },
+    case rel.cons : a b as bs hab hs ih x {
+      rcases rel_cons_left.1 hbc with ⟨c', cs, hbc', hbcs, rfl⟩,
+      exact rel.cons ⟨b, hab, hbc'⟩ (ih _ hbcs)
+    } }
+end
+
+lemma rel_mem (hr : bi_unique r) : (r ⇒ rel r ⇒ iff) (∈) (∈) :=
+assume x y hxy a b, multiset.rel_lift (assume a b, list.rel_mem hr hxy)
+
+lemma rel_add : (rel r ⇒ rel r ⇒ rel r) (+) (+) :=
+assume _ _ h₁ _ _ h₂, rel.add h₁ h₂
+
+@[to_additive multiset.rel_sum]
+lemma rel_prod [comm_monoid α] [comm_monoid β]
+  (h : r 1 1) (hf : (r ⇒ r ⇒ r) (*) (*)) : (rel r ⇒ r) prod prod :=
+ assume a b, multiset.rel_lift (assume a b, list.rel_foldr @hf h)
+
+lemma rel_join : (rel (rel r) ⇒ rel r) join join :=
+assume a b, rel_sum rel.zero (assume a b, rel_add)
+
+lemma rel_map : ((r ⇒ p) ⇒ rel r ⇒ rel p) map map :=
+assume f g hfg a b, multiset.rel_lift $ assume l₁ l₂ hl, rel_coe (list.rel_map @hfg hl)
+
+lemma rel_bind : (rel r ⇒ (r ⇒ rel p) ⇒ rel p) bind bind :=
+assume a b hab f g hfg, rel_join (rel_map @hfg hab)
 
 lemma card_eq_card_of_rel {r : α → β → Prop} {s : multiset α} {t : multiset β} (h : rel r s t) :
   card s = card t :=
@@ -1785,6 +1848,78 @@ by induction h; simp [*]
 
 end rel
 
+
+section rel_multiset_list
+
+open list relator relation
+local infixr ` ∘r ` : 80 := relation.comp
+
+variables {δ : Type*} {r : α → β → Prop} {p : γ → δ → Prop}
+
+def rel_multiset_list (r : α → β → Prop) (m : multiset α) (l : list β) : Prop :=
+m.rel r l
+
+lemma rel_multiset_list_eq_comp : rel_multiset_list r = (rel r ∘r rel_multiset_list (=)) :=
+by funext a b; simp [rel_multiset_list, (∘r), rel_eq]
+
+@[elab_as_eliminator] lemma rel_multiset_list.induction_on {p : multiset α → list β → Prop} {l u}
+  (h : rel_multiset_list r l u)
+  (h₀ : p 0 [])
+  (h₁ : ∀a b l u, r a b → rel_multiset_list r l u → p l u → p (a :: l) (b :: u)) :
+  p l u :=
+begin
+  induction u generalizing l,
+  { simp [rel_multiset_list] at h,
+    exact (h.symm ▸ h₀) },
+  { rcases (@rel_cons_right α β r l u_hd u_tl).1 h with ⟨a, l', ha, hl, rfl⟩,
+    exact h₁ _ _ _ _ ha hl (u_ih hl) }
+end
+
+lemma rel_multiset_list_zero_nil : rel_multiset_list r 0 nil :=
+rel.zero
+
+lemma rel_multiset_list_cons_cons : (r ⇒ rel_multiset_list r ⇒ rel_multiset_list r) (::) (::) :=
+assume a b h as bs hs, rel.cons h hs
+
+lemma rel_multiset_coe : (forall₂ r ⇒ rel_multiset_list r) (coe : list α → multiset α) id :=
+assume a b, rel_coe
+
+lemma rel_multiset_list_add_append :
+  (rel_multiset_list r ⇒ rel_multiset_list r ⇒ rel_multiset_list r) (+) (++) :=
+assume a b h as bs hs, rel.add h hs
+
+lemma rel_multiset_list_lift {g f} {hg} (h : (forall₂ r ⇒ p) g f) :
+  (rel_multiset_list r ⇒ p) (quot.lift g hg) f :=
+assume a b, quot.induction_on a $ assume l (hl : rel r l b),
+  let ⟨c, hlc, hcb⟩ := rel_coe_coe_iff.1 hl in
+  have g c = g l, from hg _ _ hlc.symm,
+  show p (g l) (f b), from this ▸ (h hcb)
+
+lemma rel_multiset_list_mem_mem (hr : bi_unique r) :
+  (r ⇒ rel_multiset_list r ⇒ (↔)) (∈) (∈) :=
+assume a b h l u, rel_multiset_list_lift $ assume a b, list.rel_mem hr h
+
+lemma rel_multiset_list_map_map :
+  ((r ⇒ p) ⇒ rel_multiset_list r ⇒ rel_multiset_list p) multiset.map list.map :=
+assume f g hfg a b, rel_multiset_list_lift $ assume a b h, rel_multiset_coe $ list.rel_map @hfg h
+
+lemma rel_multiset_list_join_join :
+  (rel_multiset_list (rel_multiset_list r) ⇒ rel_multiset_list r) multiset.join list.join :=
+assume a b h, rel_multiset_list.induction_on h rel_multiset_list_zero_nil $
+  assume a b l u hab hlu ih, by simpa using rel_multiset_list_add_append hab ih
+
+@[to_additive multiset.rel_multiset_list_sum_sum]
+lemma rel_multiset_list_prod_prod [comm_monoid α] [comm_monoid β]
+  (h₀ : r 1 1) (h₂ : (r ⇒ r ⇒ r) (*) (*)) :
+  (rel_multiset_list r ⇒ r) multiset.prod list.prod :=
+assume a b h, rel_multiset_list.induction_on h (by simpa using h₀) $
+  assume a b l u hab hlu ih, by simpa using h₂ hab ih
+
+lemma rel_multiset_list_bind_bind :
+  (rel_multiset_list r ⇒ (r ⇒ rel_multiset_list p) ⇒ rel_multiset_list p) multiset.bind list.bind :=
+assume a b h f g hgf, rel_multiset_list_join_join $ rel_multiset_list_map_map @hgf h
+
+end rel_multiset_list
 
 /- disjoint -/
 
@@ -1890,6 +2025,17 @@ quot.lift_on s nodup (λ s t p, propext $ perm_nodup p)
 
 @[simp] theorem nodup_cons {a : α} {s : multiset α} : nodup (a::s) ↔ a ∉ s ∧ nodup s :=
 quot.induction_on s $ λ l, nodup_cons
+
+section
+variable {r : α → β → Prop}
+open relator
+lemma rel_nodup (hr : bi_unique r) : (rel r ⇒ (↔)) nodup nodup :=
+assume x y, multiset.rel_lift (assume a b, list.rel_nodup hr)
+
+lemma rel_multiset_list_nodup_nodup (hr : bi_unique r) :
+  (rel_multiset_list r ⇒ (↔)) multiset.nodup list.nodup :=
+assume a b, rel_multiset_list_lift (assume a b, list.rel_nodup hr)
+end
 
 theorem nodup_cons_of_nodup {a : α} {s : multiset α} (m : a ∉ s) (n : nodup s) : nodup (a::s) :=
 nodup_cons.2 ⟨m, n⟩
@@ -2468,6 +2614,18 @@ rfl
 @[simp] lemma sections_cons (s : multiset (multiset α)) (m : multiset α) :
   sections (m :: s) = m.bind (λa, (sections s).map ((::) a)) :=
 rec_on_cons m s
+
+lemma rel_multiset_list_sections_sections {r : α → β → Prop} :
+  (rel_multiset_list (rel_multiset_list r) ⇒ rel_multiset_list (rel_multiset_list r))
+    multiset.sections list.sections :=
+assume a b h, rel_multiset_list.induction_on h
+  (rel_multiset_list_cons_cons rel_multiset_list_zero_nil rel_multiset_list_zero_nil) $
+  assume a b l u hab hlu ih,
+    begin
+      rw [sections_cons, list.sections, bind_map_comm],
+      apply rel_multiset_list_bind_bind ih,
+      exact assume l u hlu, rel_multiset_list_map_map (assume a b h, rel_multiset_list_cons_cons h hlu) hab
+    end
 
 lemma coe_sections : ∀(l : list (list α)),
   sections ((l.map (λl:list α, (l : multiset α))) : multiset (multiset α)) =
