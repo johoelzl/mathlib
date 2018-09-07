@@ -2,6 +2,8 @@
 Copyright (c) 2018 Mario Carneiro and Kevin Buzzard. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Mario Carneiro and Kevin Buzzard
+
+Type of submodules
 -/
 import order.order_iso
 import tactic.tidy
